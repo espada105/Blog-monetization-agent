@@ -1,0 +1,40 @@
+# 환경 변수 파일
+.env
+
+# 생성된 블로그 파일
+generated_blogs/
+
+# 로그 파일
+*.log
+
+# Python 캐시 파일
+__pycache__/
+*.py[cod]
+*$py.class
+
+# 가상환경
+venv/
+env/
+ENV/
+
+# IDE 설정
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS 생성 파일
+.DS_Store
+Thumbs.db
+
+# 임시 파일
+*.tmp
+*.temp
+
+# 데이터베이스
+*.db
+*.sqlite
+
+# 백업 파일
+*.bak
+*.backup 

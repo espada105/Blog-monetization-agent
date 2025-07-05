@@ -571,12 +571,95 @@ def tistory_post_with_selenium(
                 print(f"✅ 마크다운 모드 제목 입력: {md_title}")
                 # 본문 입력 (CodeMirror 마크다운 에디터)
                 try:
-                    # CodeMirror 에디터에 자바스크립트로 본문 입력
+                    print(f"[디버그] 입력할 md_body 내용 (앞 200자):\n{md_body[:200]}")
+                    # 정확한 CodeMirror div 선택 (마크다운 모드)
                     driver.execute_script('''
-                        var editor = document.querySelector('.CodeMirror').CodeMirror;
-                        editor.setValue(arguments[0]);
+                        var cm = document.querySelector('.CodeMirror.cm-s-tistory-markdown');
+                        if (cm && cm.CodeMirror) {
+                            // 1. CodeMirror에 값 설정
+                            cm.CodeMirror.setValue(arguments[0]);
+                            cm.CodeMirror.save();
+                            
+                            // 2. 모든 관련 이벤트 트리거
+                            cm.CodeMirror.getInputField().dispatchEvent(new Event('change', {bubbles: true}));
+                            cm.CodeMirror.getInputField().dispatchEvent(new Event('input', {bubbles: true}));
+                            cm.CodeMirror.getInputField().dispatchEvent(new Event('blur', {bubbles: true}));
+                            cm.CodeMirror.getInputField().dispatchEvent(new Event('focus', {bubbles: true}));
+                            
+                            // 3. 티스토리 에디터의 내부 textarea 이벤트도 트리거
+                            var textarea = cm.querySelector('textarea');
+                            if (textarea) {
+                                textarea.dispatchEvent(new Event('change', {bubbles: true}));
+                                textarea.dispatchEvent(new Event('input', {bubbles: true}));
+                            }
+                            
+                            // 4. React 컴포넌트의 상태 업데이트를 위한 커스텀 이벤트
+                            var customEvent = new CustomEvent('tistory-editor-update', {
+                                detail: { content: arguments[0] },
+                                bubbles: true
+                            });
+                            cm.dispatchEvent(customEvent);
+                            
+                            // 5. 티스토리 에디터의 내부 상태 강제 업데이트
+                            var editorContainer = document.querySelector('#markdown-editor-container');
+                            if (editorContainer) {
+                                editorContainer.dispatchEvent(new Event('change', {bubbles: true}));
+                            }
+                        }
                     ''', md_body)
-                    print("✅ 마크다운 모드 본문 입력 완료 (JS setValue)")
+                    
+                    # 추가: 키보드 입력 시뮬레이션으로 UI 업데이트 강제
+                    try:
+                        from selenium.webdriver.common.keys import Keys
+                        cm_element = driver.find_element(By.CSS_SELECTOR, ".CodeMirror.cm-s-tistory-markdown")
+                        cm_element.click()
+                        actions = ActionChains(driver)
+                        actions.move_to_element(cm_element)
+                        actions.click()
+                        actions.send_keys(Keys.CONTROL + "a")  # 전체 선택
+                        actions.send_keys(Keys.DELETE)  # 기존 내용 삭제
+                        actions.send_keys(md_body)  # 새 내용 입력
+                        actions.perform()
+                        print("✅ 키보드 입력 시뮬레이션으로 본문 입력 완료")
+                    except Exception as e:
+                        print(f"⚠️ 키보드 입력 시뮬레이션 실패: {e}")
+                        
+                        # 백업 방법: 기본모드에서 먼저 입력한 후 마크다운으로 전환
+                        print("🔄 백업 방법: 기본모드에서 입력 후 마크다운으로 전환 시도...")
+                        try:
+                            # 기본모드로 전환
+                            mode_btn = driver.find_element(By.CSS_SELECTOR, "#editor-mode-layer-btn")
+                            mode_btn.click()
+                            time.sleep(1)
+                            
+                            # 기본모드 선택
+                            basic_mode = driver.find_element(By.XPATH, "//*[@id='editor-mode-kakao-tistory']")
+                            basic_mode.click()
+                            time.sleep(2)
+                            
+                            # 기본모드에서 iframe 내부에 HTML 입력
+                            iframe = driver.find_element(By.CSS_SELECTOR, "iframe#editor-tistory_ifr")
+                            driver.switch_to.frame(iframe)
+                            body_box = driver.find_element(By.CSS_SELECTOR, "body")
+                            body_box.clear()
+                            body_box.send_keys(Keys.CONTROL, 'a')
+                            body_box.send_keys(Keys.DELETE)
+                            body_box.send_keys(html_body)
+                            driver.switch_to.default_content()
+                            time.sleep(1)
+                            print("✅ 기본모드에서 본문 입력 완료")
+                            
+                            # 다시 마크다운 모드로 전환
+                            mode_btn = driver.find_element(By.CSS_SELECTOR, "#editor-mode-layer-btn")
+                            mode_btn.click()
+                            time.sleep(1)
+                            markdown_mode = driver.find_element(By.XPATH, "//*[@id='editor-mode-markdown-text']")
+                            markdown_mode.click()
+                            time.sleep(2)
+                            print("✅ 마크다운 모드로 재전환 완료")
+                            
+                        except Exception as e2:
+                            print(f"❌ 백업 방법도 실패: {e2}")
                 except Exception as e:
                     print(f"❌ 마크다운 본문 입력 오류(JS): {e}")
                 time.sleep(1)
@@ -746,7 +829,7 @@ def tistory_post_with_selenium(
     print("⏳ 발행 처리 대기 중...")
     time.sleep(5)
     driver.quit()
-    print("🎉 티스토리 자동 업로드 완료!")
+    print("�� 티스토리 자동 업로드 완료!")
 
 if __name__ == "__main__":
     import argparse

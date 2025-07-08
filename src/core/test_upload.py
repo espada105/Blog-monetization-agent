@@ -1,7 +1,13 @@
 import json
 import asyncio
-from bbc_news_processor import BBCNewsProcessor
-import config
+import os
+import sys
+
+# 프로젝트 루트를 Python 경로에 추가
+sys.path.append(os.path.dirname(os.path.dirname(os.path.dirname(__file__))))
+
+from src.core.bbc_news_processor import BBCNewsProcessor
+from config import config
 
 async def test_upload_from_json():
     """기존 JSON 파일을 사용해서 티스토리 자동 포스팅 테스트"""
@@ -20,7 +26,10 @@ async def test_upload_from_json():
     try:
         # 1. 기존 JSON 파일 읽기
         print("📖 기존 JSON 파일 읽는 중...")
-        with open("bbc_news_json/bbc_news_all_2025-07-05.json", "r", encoding="utf-8") as f:
+        project_root = os.path.dirname(os.path.dirname(os.path.dirname(__file__)))
+        json_file_path = os.path.join(project_root, "data", "bbc_news_json", "bbc_news_all_2025-07-05.json")
+        
+        with open(json_file_path, "r", encoding="utf-8") as f:
             news_data = json.load(f)
         
         print(f"📰 읽은 뉴스 개수: {len(news_data)}개")

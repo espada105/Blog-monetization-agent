@@ -1,10 +1,13 @@
 # 환경 변수 파일
 .env
 
-# 생성된 블로그 파일
-generated_blogs/
+# 생성된 데이터 파일들
+data/bbc_news_json/
+data/blog_posts/
+data/bbc_news/
 
 # 로그 파일
+logs/
 *.log
 
 # Python 캐시 파일
@@ -37,4 +40,10 @@ Thumbs.db
 
 # 백업 파일
 *.bak
-*.backup 
+*.backup
+
+# HAR 파일 (네트워크 캡처)
+*.har
+
+# 설정 파일 (민감한 정보 포함)
+config/tistory_config.json 

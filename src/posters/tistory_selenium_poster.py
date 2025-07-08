@@ -82,11 +82,32 @@ def tistory_post_with_selenium(
     options = Options()
     if headless:
         options.add_argument('--headless')
+    else:
+        # 브라우저 창이 보이도록 설정
+        options.add_argument('--start-maximized')
+        options.add_argument('--disable-blink-features=AutomationControlled')
+        options.add_experimental_option("excludeSwitches", ["enable-automation"])
+        options.add_experimental_option('useAutomationExtension', False)
+    
     options.add_argument('--disable-gpu')
     options.add_argument('--window-size=1200,900')
-    from selenium.webdriver.chrome.service import Service
-    service = Service(ChromeDriverManager().install())
-    driver = webdriver.Chrome(service=service, options=options)
+    options.add_argument('--no-sandbox')
+    options.add_argument('--disable-dev-shm-usage')
+    
+    try:
+        from selenium.webdriver.chrome.service import Service
+        service = Service(ChromeDriverManager().install())
+        driver = webdriver.Chrome(service=service, options=options)
+    except Exception as e:
+        print(f"❌ Chrome WebDriver 초기화 실패: {e}")
+        print("🔄 대체 방법으로 시도합니다...")
+        try:
+            # 대체 방법: 직접 Chrome 실행
+            driver = webdriver.Chrome(options=options)
+        except Exception as e2:
+            print(f"❌ 대체 방법도 실패: {e2}")
+            print("💡 Chrome 브라우저가 설치되어 있는지 확인해주세요.")
+            return
 
     # 3. 카카오 자동 로그인
     if kakao_email and kakao_password:
@@ -833,16 +854,78 @@ def tistory_post_with_selenium(
 
 if __name__ == "__main__":
     import argparse
+    import os
+    import glob
+    import json
+    from datetime import datetime
+    
+    # 설정 파일 로드
+    def load_config():
+        # 프로젝트 루트의 config 폴더에서 설정 파일 찾기
+        project_root = os.path.dirname(os.path.dirname(os.path.dirname(__file__)))
+        config_file = os.path.join(project_root, "config", "tistory_config.json")
+        if os.path.exists(config_file):
+            try:
+                with open(config_file, 'r', encoding='utf-8') as f:
+                    return json.load(f)
+            except Exception as e:
+                print(f"⚠️ 설정 파일 로드 실패: {e}")
+        return {}
+    
+    config = load_config()
+    
     parser = argparse.ArgumentParser(description="티스토리 셀레니움 자동 포스팅")
-    parser.add_argument('--file', required=True, help='마크다운 파일 경로')
-    parser.add_argument('--blog', required=True, help='블로그 주소 (예: https://aigent-hong.tistory.com)')
-    parser.add_argument('--category', default='IT', help='카테고리명')
-    parser.add_argument('--tags', default='BBC뉴스,글로벌트렌드,기술동향', help='태그(쉼표구분)')
-    parser.add_argument('--headless', action='store_true', help='브라우저 창 숨김')
-    parser.add_argument('--kakao-email', help='카카오 이메일 (자동 로그인용)')
-    parser.add_argument('--kakao-password', help='카카오 비밀번호 (자동 로그인용)')
-    parser.add_argument('--json-file', help='JSON 파일 경로 (본문에 포함할 데이터)') # 추가된 인자
+    parser.add_argument('--file', help='마크다운 파일 경로 (지정하지 않으면 최신 파일 자동 선택)')
+    parser.add_argument('--blog', default=config.get('blog_url', 'https://aigent-hong.tistory.com'), help='블로그 주소')
+    parser.add_argument('--category', default=config.get('default_category', 'IT'), help='카테고리명')
+    parser.add_argument('--tags', default=config.get('default_tags', 'BBC뉴스,글로벌트렌드,기술동향'), help='태그(쉼표구분)')
+    parser.add_argument('--headless', action='store_true', default=config.get('headless', False), help='브라우저 창 숨김')
+    parser.add_argument('--kakao-email', default=config.get('kakao_email', ''), help='카카오 이메일')
+    parser.add_argument('--kakao-password', default=config.get('kakao_password', ''), help='카카오 비밀번호')
+    parser.add_argument('--json-file', help='JSON 파일 경로 (자동으로 찾음)')
+    parser.add_argument('--auto', action='store_true', help='자동 모드: 최신 블로그 글과 JSON 파일 자동 선택')
     args = parser.parse_args()
+    
+    # 자동 모드: 최신 파일들 자동 선택
+    if args.auto or not args.file:
+        print("[AUTO] 자동 모드: 최신 파일들을 찾는 중...")
+        
+        # 최신 블로그 글 파일 찾기
+        project_root = os.path.dirname(os.path.dirname(os.path.dirname(__file__)))
+        blog_files = glob.glob(os.path.join(project_root, "data", "blog_posts", "blog_*.md"))
+        if blog_files:
+            # 파일 수정 시간 기준으로 최신 파일 선택
+            latest_blog_file = max(blog_files, key=os.path.getmtime)
+            args.file = latest_blog_file
+            print(f"📝 선택된 블로그 글: {latest_blog_file}")
+        else:
+            print("❌ data/blog_posts 폴더에 블로그 글 파일이 없습니다.")
+            exit(1)
+        
+        # 최신 JSON 파일 찾기
+        json_files = glob.glob(os.path.join(project_root, "data", "bbc_news_json", "bbc_news_*.json"))
+        if json_files:
+            latest_json_file = max(json_files, key=os.path.getmtime)
+            args.json_file = latest_json_file
+            print(f"📊 선택된 JSON 파일: {latest_json_file}")
+        else:
+            print("⚠️ JSON 파일을 찾을 수 없어 JSON 데이터 없이 진행합니다.")
+    
+    # 파일 존재 확인
+    if not os.path.exists(args.file):
+        print(f"❌ 블로그 글 파일을 찾을 수 없습니다: {args.file}")
+        exit(1)
+    
+    if args.json_file and not os.path.exists(args.json_file):
+        print(f"❌ JSON 파일을 찾을 수 없습니다: {args.json_file}")
+        args.json_file = None
+    
+    print(f"🚀 티스토리 자동 포스팅 시작!")
+    print(f"📝 파일: {args.file}")
+    print(f"📊 JSON: {args.json_file}")
+    print(f"🏷️ 카테고리: {args.category}")
+    print(f"🏷️ 태그: {args.tags}")
+    
     tistory_post_with_selenium(
         markdown_file=args.file,
         blog_url=args.blog,
@@ -851,5 +934,5 @@ if __name__ == "__main__":
         headless=args.headless,
         kakao_email=args.kakao_email,
         kakao_password=args.kakao_password,
-        json_file=args.json_file # 추가된 인자 전달
+        json_file=args.json_file
     ) 

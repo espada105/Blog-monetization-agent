@@ -17,7 +17,7 @@ class BBCNewsCrawler:
         }
     
     async def get_today_news(self, category='world', limit=10):
-        """오늘 BBC 뉴스 가져오기"""
+        """오늘 BBC 뉴스 가져오기 (없으면 이전 날짜 포함)"""
         if category not in self.rss_feeds:
             print(f"❌ 지원하지 않는 카테고리: {category}")
             return []
@@ -28,9 +28,13 @@ class BBCNewsCrawler:
             today = datetime.now().date()
             
             today_news = []
-            for entry in feed.entries[:limit]:
+            recent_news = []  # 최근 뉴스 (오늘 + 이전 3일)
+            
+            for entry in feed.entries[:limit * 2]:  # 더 많은 뉴스 확인
                 # 발행일 확인
                 pub_date = datetime(*entry.published_parsed[:6])
+                days_diff = (today - pub_date.date()).days
+                
                 if pub_date.date() == today:
                     news_item = {
                         'title': entry.title,
@@ -40,9 +44,27 @@ class BBCNewsCrawler:
                         'category': category
                     }
                     today_news.append(news_item)
+                elif days_diff <= 3:  # 최근 3일 이내 뉴스
+                    news_item = {
+                        'title': entry.title,
+                        'link': entry.link,
+                        'summary': entry.summary,
+                        'published': pub_date,
+                        'category': category
+                    }
+                    recent_news.append(news_item)
             
-            print(f"✅ BBC {category} 뉴스 {len(today_news)}개 수집 완료")
-            return today_news
+            # 오늘 뉴스가 있으면 오늘 뉴스 반환
+            if today_news:
+                print(f"✅ BBC {category} 오늘 뉴스 {len(today_news)}개 수집 완료")
+                return today_news[:limit]
+            # 오늘 뉴스가 없으면 최근 뉴스 반환
+            elif recent_news:
+                print(f"⚠️ 오늘 뉴스가 없어 최근 {len(recent_news)}개 뉴스를 사용합니다.")
+                return recent_news[:limit]
+            else:
+                print(f"❌ BBC {category} 뉴스를 찾을 수 없습니다.")
+                return []
             
         except Exception as e:
             print(f"❌ BBC 뉴스 수집 실패: {e}")
@@ -53,7 +75,7 @@ class BBCNewsCrawler:
         all_news = []
         
         for category in self.rss_feeds.keys():
-            print(f"📰 {category} 카테고리 수집 중...")
+            print(f"[NEWS] {category} 카테고리 수집 중...")
             category_news = await self.get_today_news(category, limit_per_category)
             all_news.extend(category_news)
             await asyncio.sleep(1)  # 요청 간격 조절

@@ -1,12 +1,16 @@
 import json
 import asyncio
 import os
+import sys
 from datetime import datetime
-from bbc_rss_crawler import BBCNewsCrawler
-from tistory_auto_poster import TistoryAutoPoster
 import requests
-import config
 import re
+
+# 프로젝트 루트를 Python 경로에 추가
+sys.path.append(os.path.dirname(os.path.dirname(os.path.dirname(__file__))))
+
+from src.scrapers.bbc_rss_crawler import BBCNewsCrawler
+from config import config
 
 class BBCNewsProcessor:
     def __init__(self, blog_name=None, cookie=None):
@@ -17,14 +21,11 @@ class BBCNewsProcessor:
         # 티스토리 설정 (선택사항)
         self.blog_name = blog_name
         self.cookie = cookie
-        if blog_name and cookie:
-            self.tistory_poster = TistoryAutoPoster(blog_name, cookie)
-        else:
-            self.tistory_poster = None
+        self.tistory_poster = None  # API 포스터는 사용하지 않음
     
     async def collect_and_save_json(self, category='all', limit_per_category=5):
         """BBC 뉴스를 수집하고 JSON으로 저장"""
-        print("📰 BBC 뉴스 수집 중...")
+        print("[NEWS] BBC 뉴스 수집 중...")
         
         if category == 'all':
             news_list = await self.crawler.get_all_categories_today(limit_per_category)
@@ -32,20 +33,21 @@ class BBCNewsProcessor:
             news_list = await self.crawler.get_today_news(category, limit_per_category)
         
         # 기사별 본문 수집
-        print("📝 기사 본문 수집 중...")
+        print(" 기사 본문 수집 중...")
         for news in news_list:
             content = await self.crawler.get_article_content(news['link'])
             news['content'] = content if content else "(본문을 가져오지 못했습니다.)"
         
         # JSON으로 저장
         today_str = datetime.now().strftime('%Y-%m-%d')
-        os.makedirs('bbc_news_json', exist_ok=True)
-        filename = f"bbc_news_json/bbc_news_{category}_{today_str}.json"
+        data_dir = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), 'data', 'bbc_news_json')
+        os.makedirs(data_dir, exist_ok=True)
+        filename = os.path.join(data_dir, f"bbc_news_{category}_{today_str}.json")
         
         with open(filename, 'w', encoding='utf-8') as f:
             json.dump(news_list, f, ensure_ascii=False, indent=2, default=str)
         
-        print(f"💾 JSON 저장 완료: {filename}")
+        print(f"[SAVE] JSON 저장 완료: {filename}")
         return news_list
     
     def create_topic_prompt(self, news_data):
@@ -145,11 +147,11 @@ class BBCNewsProcessor:
                 topic = topic.replace('"', '').replace("'", '').replace('\n', ' ').strip()
                 return topic
             else:
-                print(f"❌ 주제 생성 LLM API 오류: {response.status_code}")
+                print(f" 주제 생성 LLM API 오류: {response.status_code}")
                 return self._generate_default_topic(news_data)
                 
         except Exception as e:
-            print(f"❌ 주제 생성 LLM 연결 실패: {e}")
+            print(f" 주제 생성 LLM 연결 실패: {e}")
             return self._generate_default_topic(news_data)
     
     def _generate_default_topic(self, news_data):
@@ -195,11 +197,11 @@ class BBCNewsProcessor:
             if response.status_code == 200:
                 return response.json()["response"]
             else:
-                print(f"❌ LLM API 오류: {response.status_code}")
+                print(f" LLM API 오류: {response.status_code}")
                 return self._generate_dummy_blog_post(news_data, topic)
                 
         except Exception as e:
-            print(f"❌ LLM 연결 실패: {e}")
+            print(f" LLM 연결 실패: {e}")
             return self._generate_dummy_blog_post(news_data, topic)
     
     def _generate_dummy_blog_post(self, news_data, topic):
@@ -258,41 +260,22 @@ class BBCNewsProcessor:
     async def save_blog_post(self, content, topic):
         """블로그 글을 마크다운 파일로 저장 (파일명 안전하게)"""
         today_str = datetime.now().strftime('%Y-%m-%d')
-        os.makedirs('blog_posts', exist_ok=True)
+        data_dir = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), 'data', 'blog_posts')
+        os.makedirs(data_dir, exist_ok=True)
         # 파일명에 쓸 수 있도록 30자 이내, 영문/한글/숫자/공백/밑줄만 허용
         safe_topic = re.sub(r'[^\w\d가-힣_ ]', '', topic)[:30].strip().replace(' ', '_')
         if not safe_topic:
             safe_topic = 'blog_post'
-        filename = f"blog_posts/blog_{safe_topic}_{today_str}.md"
+        filename = os.path.join(data_dir, f"blog_{safe_topic}_{today_str}.md")
         with open(filename, 'w', encoding='utf-8') as f:
             f.write(content)
-        print(f"💾 블로그 글 저장 완료: {filename}")
+        print(f"[SAVE] 블로그 글 저장 완료: {filename}")
         return filename
     
     async def post_to_tistory(self, blog_file, category_id=None, tags=None):
-        """티스토리에 자동 포스팅"""
-        if not self.tistory_poster:
-            print("❌ 티스토리 설정이 없습니다. config.py에서 blog_name과 cookie를 설정해주세요.")
-            return None
-        
-        try:
-            print(f"🚀 티스토리 포스팅 시작: {blog_file}")
-            result = self.tistory_poster.post_blog_from_file(
-                blog_file,
-                category_id=category_id,
-                tags=tags
-            )
-            
-            if result:
-                print("🎉 티스토리 포스팅 완료!")
-                return result
-            else:
-                print("❌ 티스토리 포스팅 실패")
-                return None
-                
-        except Exception as e:
-            print(f"❌ 티스토리 포스팅 중 오류: {e}")
-            return None
+        """티스토리에 자동 포스팅 (API 방식은 사용하지 않음)"""
+        print(" API 방식 포스팅은 사용하지 않습니다. 셀레니움 방식만 사용합니다.")
+        return None
 
 # 사용 예시
 async def main():
@@ -314,12 +297,12 @@ async def main():
     
     # 2. 블로그 글 주제 생성 (자동 또는 수동)
     if USE_AUTO_TOPIC:
-        print("🤖 LLM을 사용해 블로그 글 주제를 생성합니다...")
+        print(" LLM을 사용해 블로그 글 주제를 생성합니다...")
         topic = await processor.generate_topic(news_data)
-        print(f"📝 생성된 주제: {topic}")
+        print(f" 생성된 주제: {topic}")
     else:
         topic = DEFAULT_TOPIC
-        print(f"📝 설정된 주제 사용: {topic}")
+        print(f" 설정된 주제 사용: {topic}")
     
     # 3. 블로그 글 생성
     blog_content = await processor.generate_blog_post(news_data, topic)
@@ -335,8 +318,35 @@ async def main():
             tags=TAGS
         )
     
-    print(f"✅ 완료! 블로그 글: {filename}")
-    print(f"📝 주제: {topic}")
+    # 6. 셀레니움 자동 포스팅 (새로 추가)
+    print(" 셀레니움 자동 포스팅 시작...")
+    try:
+        import subprocess
+        import sys
+        
+        # 셀레니움 포스터 실행
+        poster_path = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), 'src', 'posters', 'tistory_selenium_poster.py')
+        cmd = [
+            sys.executable, poster_path,
+            "--file", filename,
+            "--auto"  # 자동으로 JSON 파일 찾기
+        ]
+        
+        result = subprocess.run(cmd, capture_output=True, text=True)
+        
+        if result.returncode == 0:
+            print(" 셀레니움 자동 포스팅 완료!")
+            print(f" 블로그 확인: https://aigent-hong.tistory.com")
+        else:
+            print(f" 셀레니움 포스팅 중 오류: {result.stderr}")
+            
+    except Exception as e:
+        print(f" 셀레니움 포스팅 실패: {e}")
+    
+    print(f" 완료! 블로그 글: {filename}")
+    print(f" 주제: {topic}")
+    
+    return filename, topic  # 결과 반환
 
 if __name__ == "__main__":
     asyncio.run(main()) 

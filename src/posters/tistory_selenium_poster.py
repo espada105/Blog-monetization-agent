@@ -854,85 +854,118 @@ def tistory_post_with_selenium(
 
 if __name__ == "__main__":
     import argparse
+    import re
     import os
-    import glob
-    import json
-    from datetime import datetime
+    
+    def get_latest_blog_file():
+        """recentBlog.md에서 최신 블로그 파일 경로 추출"""
+        recent_blog_file = "recentBlog.md"
+        if not os.path.exists(recent_blog_file):
+            print("❌ recentBlog.md 파일이 없습니다.")
+            return None
+        
+        with open(recent_blog_file, 'r', encoding='utf-8') as f:
+            content = f.read()
+        
+        # 파일경로 추출
+        match = re.search(r'- \*\*파일경로\*\*: (.+\.md)', content)
+        if match:
+            file_path = match.group(1)
+            if os.path.exists(file_path):
+                print(f"✅ recentBlog.md에서 파일을 찾았습니다: {file_path}")
+                return file_path
+            else:
+                print(f"❌ 파일이 존재하지 않습니다: {file_path}")
+                return None
+        else:
+            print("❌ recentBlog.md에서 파일경로를 찾을 수 없습니다.")
+            return None
+    
+    parser = argparse.ArgumentParser(description="BBC 셀레니움 티스토리 자동 포스터")
+    parser.add_argument('--file', type=str, help='업로드할 마크다운 파일 경로 (지정하지 않으면 recentBlog.md에서 자동 찾기)')
+    parser.add_argument('--auto', action='store_true', help='자동 업로드 모드')
+    args = parser.parse_args()
+
+    print("[BBC] 셀레니움 기반 티스토리 자동 업로드 시작!")
+    print("BBC 뉴스 기반 블로그 글을 티스토리에 업로드합니다.")
+    
+    # 파일 경로 결정
+    file_path = args.file
+    if file_path is None:
+        print("파일 경로가 지정되지 않았습니다. recentBlog.md에서 최신 파일을 찾습니다.")
+        file_path = get_latest_blog_file()
+        if file_path is None:
+            print("❌ 업로드할 파일을 찾을 수 없습니다.")
+            sys.exit(1)
+    
+    # 자동 모드: 최신 파일들 자동 선택
+    if args.auto:
+        print("자동 모드: recentBlog.md에서 최신 BBC 블로그 글 파일을 찾아 업로드합니다.")
+        
+        # 최신 블로그 글 파일 찾기
+        if file_path is None:
+            file_path = get_latest_blog_file()
+            if file_path is None:
+                print("❌ 업로드할 파일을 찾을 수 없습니다.")
+                sys.exit(1)
+    
+    print(f"📁 업로드할 파일: {file_path}")
     
     # 설정 파일 로드
     def load_config():
-        # 프로젝트 루트의 config 폴더에서 설정 파일 찾기
-        project_root = os.path.dirname(os.path.dirname(os.path.dirname(__file__)))
-        config_file = os.path.join(project_root, "config", "tistory_config.json")
+        import json
+        # 현재 디렉토리 기준으로 config 폴더에서 설정 파일 찾기
+        current_dir = os.getcwd()
+        config_file = os.path.join(current_dir, "config", "tistory_config.json")
         if os.path.exists(config_file):
             try:
                 with open(config_file, 'r', encoding='utf-8') as f:
-                    return json.load(f)
+                    config_data = json.load(f)
+                    print(f"✅ 설정 파일 로드 완료: {config_file}")
+                    return config_data
             except Exception as e:
                 print(f"⚠️ 설정 파일 로드 실패: {e}")
+        else:
+            print(f"⚠️ 설정 파일을 찾을 수 없습니다: {config_file}")
         return {}
     
     config = load_config()
     
-    parser = argparse.ArgumentParser(description="티스토리 셀레니움 자동 포스팅")
-    parser.add_argument('--file', help='마크다운 파일 경로 (지정하지 않으면 최신 파일 자동 선택)')
-    parser.add_argument('--blog', default=config.get('blog_url', 'https://aigent-hong.tistory.com'), help='블로그 주소')
-    parser.add_argument('--category', default=config.get('default_category', 'IT'), help='카테고리명')
-    parser.add_argument('--tags', default=config.get('default_tags', 'BBC뉴스,글로벌트렌드,기술동향'), help='태그(쉼표구분)')
-    parser.add_argument('--headless', action='store_true', default=config.get('headless', False), help='브라우저 창 숨김')
-    parser.add_argument('--kakao-email', default=config.get('kakao_email', ''), help='카카오 이메일')
-    parser.add_argument('--kakao-password', default=config.get('kakao_password', ''), help='카카오 비밀번호')
-    parser.add_argument('--json-file', help='JSON 파일 경로 (자동으로 찾음)')
-    parser.add_argument('--auto', action='store_true', help='자동 모드: 최신 블로그 글과 JSON 파일 자동 선택')
-    args = parser.parse_args()
+    # 블로그 주소 및 기본값 설정
+    blog_url = config.get('blog_url', 'https://aigent-hong.tistory.com')
+    category_name = config.get('default_category', 'IT')
+    tags = config.get('default_tags', 'BBC뉴스,글로벌트렌드,기술동향')
+    headless = config.get('headless', False)
+    kakao_email = config.get('kakao_email', '')
+    kakao_password = config.get('kakao_password', '')
+    json_file = None # BBC 포스터는 기본적으로 JSON 파일 사용 안 함
     
-    # 자동 모드: 최신 파일들 자동 선택
-    if args.auto or not args.file:
-        print("[AUTO] 자동 모드: 최신 파일들을 찾는 중...")
-        
-        # 최신 블로그 글 파일 찾기
-        project_root = os.path.dirname(os.path.dirname(os.path.dirname(__file__)))
-        blog_files = glob.glob(os.path.join(project_root, "data", "blog_posts", "blog_*.md"))
-        if blog_files:
-            # 파일 수정 시간 기준으로 최신 파일 선택
-            latest_blog_file = max(blog_files, key=os.path.getmtime)
-            args.file = latest_blog_file
-            print(f"📝 선택된 블로그 글: {latest_blog_file}")
-        else:
-            print("❌ data/blog_posts 폴더에 블로그 글 파일이 없습니다.")
-            exit(1)
-        
-        # 최신 JSON 파일 찾기
-        json_files = glob.glob(os.path.join(project_root, "data", "bbc_news_json", "bbc_news_*.json"))
-        if json_files:
-            latest_json_file = max(json_files, key=os.path.getmtime)
-            args.json_file = latest_json_file
-            print(f"📊 선택된 JSON 파일: {latest_json_file}")
-        else:
-            print("⚠️ JSON 파일을 찾을 수 없어 JSON 데이터 없이 진행합니다.")
+    print(f"🔐 카카오 계정 정보 확인: {kakao_email}")
+    print(f"🔐 카카오 비밀번호 확인: {'설정됨' if kakao_password else '설정되지 않음'}")
     
     # 파일 존재 확인
-    if not os.path.exists(args.file):
-        print(f"❌ 블로그 글 파일을 찾을 수 없습니다: {args.file}")
+    if not os.path.exists(file_path):
+        print(f"❌ 블로그 글 파일을 찾을 수 없습니다: {file_path}")
         exit(1)
     
-    if args.json_file and not os.path.exists(args.json_file):
-        print(f"❌ JSON 파일을 찾을 수 없습니다: {args.json_file}")
-        args.json_file = None
+    if json_file and not os.path.exists(json_file):
+        print(f"❌ JSON 파일을 찾을 수 없습니다: {json_file}")
+        json_file = None
     
     print(f"🚀 티스토리 자동 포스팅 시작!")
-    print(f"📝 파일: {args.file}")
-    print(f"📊 JSON: {args.json_file}")
-    print(f"🏷️ 카테고리: {args.category}")
-    print(f"🏷️ 태그: {args.tags}")
+    print(f"📝 파일: {file_path}")
+    print(f"📊 JSON: {json_file}")
+    print(f"🏷️ 카테고리: {category_name}")
+    print(f"🏷️ 태그: {tags}")
+    print(f"🔐 자동 로그인: {'예' if kakao_email and kakao_password else '아니오'}")
     
     tistory_post_with_selenium(
-        markdown_file=args.file,
-        blog_url=args.blog,
-        category_name=args.category,
-        tags=args.tags,
-        headless=args.headless,
-        kakao_email=args.kakao_email,
-        kakao_password=args.kakao_password,
-        json_file=args.json_file
+        markdown_file=file_path,
+        blog_url=blog_url,
+        category_name=category_name,
+        tags=tags,
+        headless=headless,
+        kakao_email=kakao_email,
+        kakao_password=kakao_password,
+        json_file=json_file
     ) 

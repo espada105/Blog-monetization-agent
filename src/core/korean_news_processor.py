@@ -1,3 +1,9 @@
+#!/usr/bin/env python3
+"""
+한국 뉴스 프로세서
+한국 뉴스를 수집하고 블로그 글을 생성하는 프로세서
+"""
+
 import json
 import asyncio
 import os
@@ -9,12 +15,12 @@ import re
 # 프로젝트 루트를 Python 경로에 추가
 sys.path.append(os.path.dirname(os.path.dirname(os.path.dirname(__file__))))
 
-from src.scrapers.bbc_rss_crawler import BBCNewsCrawler
+from src.scrapers.korean_news_crawler import KoreanNewsCrawler
 from config import config
 
-class BBCNewsProcessor:
+class KoreanNewsProcessor:
     def __init__(self, blog_name=None, cookie=None):
-        self.crawler = BBCNewsCrawler()
+        self.crawler = KoreanNewsCrawler()
         self.ollama_url = config.OLLAMA_URL
         self.model = config.OLLAMA_MODEL
         
@@ -24,13 +30,14 @@ class BBCNewsProcessor:
         self.tistory_poster = None  # API 포스터는 사용하지 않음
     
     async def collect_and_save_json(self, category='all', limit_per_category=5):
-        """BBC 뉴스를 수집하고 JSON으로 저장"""
-        print("[NEWS] BBC 뉴스 수집 중...")
+        """한국 뉴스를 수집하고 JSON으로 저장"""
+        print("[NEWS] 한국 뉴스 수집 중...")
         
-        if category == 'all':
-            news_list = await self.crawler.get_all_categories_today(limit_per_category)
-        else:
-            news_list = await self.crawler.get_today_news(category, limit_per_category)
+        async with self.crawler:
+            if category == 'all':
+                news_list = await self.crawler.get_all_categories_today(limit_per_category)
+            else:
+                news_list = await self.crawler.get_category_news(category, limit_per_category)
         
         # 기사별 본문 수집
         print(" 기사 본문 수집 중...")
@@ -40,9 +47,9 @@ class BBCNewsProcessor:
         
         # JSON으로 저장
         today_str = datetime.now().strftime('%Y-%m-%d')
-        data_dir = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), 'data', 'bbc_news_json')
+        data_dir = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), 'data', 'korean_news_json')
         os.makedirs(data_dir, exist_ok=True)
-        filename = os.path.join(data_dir, f"bbc_news_{category}_{today_str}.json")
+        filename = os.path.join(data_dir, f"korean_news_{category}_{today_str}.json")
         
         with open(filename, 'w', encoding='utf-8') as f:
             json.dump(news_list, f, ensure_ascii=False, indent=2, default=str)
@@ -58,6 +65,7 @@ class BBCNewsProcessor:
             summary = f"""
 제목: {news['title']}
 카테고리: {news['category']}
+출처: {news['source']}
 요약: {news['summary']}
 """
             news_summaries.append(summary)
@@ -65,7 +73,7 @@ class BBCNewsProcessor:
         combined_summaries = "\n\n".join(news_summaries)
         
         prompt = f"""
-당신은 한국의 전문 기술/경제 블로거입니다. 다음 BBC 뉴스들을 분석하여 블로그 글의 주제를 생성해주세요.
+당신은 한국의 전문 기술/경제 블로거입니다. 다음 한국 뉴스들을 분석하여 블로그 글의 주제를 생성해주세요.
 
 참고 뉴스:
 {combined_summaries}
@@ -76,22 +84,23 @@ class BBCNewsProcessor:
 3. 전문적이면서도 접근하기 쉬운 주제
 4. SEO에 유리한 키워드 포함
 5. 10-15자 이내의 간결한 주제
-6. "글로벌", "트렌드", "동향", "분석" 등의 키워드 활용
+6. "한국", "트렌드", "동향", "분석" 등의 키워드 활용
 
 주제:
 """
         return prompt
 
     def create_blog_prompt(self, news_data, topic):
-        """블로그 글 작성을 위한 프롬프트 생성"""
+        """블로그 글 작성을 위한 프롬프트 생성 (영어, 마크다운 텍스트 반환)"""
         # 뉴스 요약 생성
         news_summaries = []
         for news in news_data:
             summary = f"""
 제목: {news['title']}
 카테고리: {news['category']}
+출처: {news['source']}
 요약: {news['summary']}
-출처: {news['link']}
+링크: {news['link']}
 발행일: {news['published']}
 """
             news_summaries.append(summary)
@@ -99,28 +108,34 @@ class BBCNewsProcessor:
         combined_summaries = "\n\n".join(news_summaries)
         
         prompt = f"""
-당신은 한국의 전문 기술/경제 블로거입니다. 다음 BBC 뉴스들을 바탕으로 티스토리 블로그에 올릴 전문적인 글을 작성해주세요.
+You are a professional tech/economy blogger. Based on the following Korean news, write a professional and easy-to-read English blog post about '{topic}'.
 
-주제: {topic}
+Write the entire post in English. Do not use Korean.
 
-참고 뉴스:
+Reference News:
 {combined_summaries}
 
-작성 요구사항:
-1. 전문적이고 깊이 있는 분석이 포함된 글
-2. 한국 독자들이 이해하기 쉽게 설명
-3. 마크다운 형식 적절히 사용 (제목, 소제목, 강조, 인용 등)
-4. 뉴스 출처 링크 포함
-5. 2000-3000자 분량
-6. SEO 최적화 (키워드 자연스럽게 포함)
-7. 독자의 관심을 끄는 제목과 인트로
-8. 실무진들이 알아야 할 핵심 포인트 포함
-9. 향후 전망과 시사점 포함
+Summarize and analyze the above news to write a professional English blog post about '{topic}'.
 
-블로그 글:
+Requirements:
+1. Write only in English (no Korean)
+2. Include in-depth analysis
+3. Make it easy for global readers to understand
+4. Use Markdown formatting (titles, subtitles, emphasis, quotes, etc.)
+5. Each paragraph should be clearly separated (use a blank line between paragraphs)
+6. Use proper spacing and indentation for readability
+7. Include news source links
+8. 2000-3000 characters in length
+9. SEO optimized (naturally include keywords)
+10. Catchy title and introduction
+11. Key takeaways for business professionals
+12. Future outlook and implications
+13. Provide insights for the global market
+
+Return ONLY the blog post in Markdown format. Do NOT return JSON, code block, or any explanation. Only the blog post content itself.
 """
         return prompt
-    
+
     async def generate_topic(self, news_data):
         """LLM을 사용해 블로그 글 주제 생성"""
         prompt = self.create_topic_prompt(news_data)
@@ -161,23 +176,22 @@ class BBCNewsProcessor:
         
         if len(unique_categories) == 1:
             category = unique_categories[0]
-            if category == 'technology':
-                return "글로벌 기술 트렌드와 시장 동향"
-            elif category == 'business':
-                return "글로벌 비즈니스 동향과 시장 분석"
-            elif category == 'world':
-                return "글로벌 정치경제 동향 분석"
+            if category == 'it':
+                return "한국 IT 산업 동향과 기술 트렌드"
+            elif category == 'economy':
+                return "한국 경제 동향과 시장 분석"
+            elif category == 'politics':
+                return "한국 정치경제 동향과 정책 분석"
             elif category == 'science':
-                return "최신 과학기술 동향과 미래 전망"
+                return "한국 과학기술 동향과 미래 전망"
             else:
-                return f"BBC {category} 뉴스 분석과 시사점"
+                return f"한국 {category} 뉴스 분석과 시사점"
         else:
-            return "글로벌 주요 이슈와 트렌드 분석"
+            return "한국 주요 이슈와 트렌드 분석"
 
     async def generate_blog_post(self, news_data, topic):
-        """LLM을 사용해 블로그 글 생성"""
+        """LLM을 사용해 블로그 글 생성 (영어, JSON 응답)"""
         prompt = self.create_blog_prompt(news_data, topic)
-        
         try:
             response = requests.post(
                 f"{self.ollama_url}/api/generate",
@@ -193,24 +207,66 @@ class BBCNewsProcessor:
                 },
                 timeout=120
             )
-            
             if response.status_code == 200:
-                return response.json()["response"]
+                raw = response.json()["response"].strip()
+                # JSON 파싱
+                try:
+                    # JSON 응답이 코드블록(```json ... ```)으로 감싸져 있을 수도 있음
+                    if raw.startswith('```json'):
+                        raw = raw[7:]
+                    if raw.startswith('```'):
+                        raw = raw[3:]
+                    if raw.endswith('```'):
+                        raw = raw[:-3]
+                    data = json.loads(raw)
+                    # 필수 필드 추출
+                    title = data.get('title', topic)
+                    summary = data.get('summary', '')
+                    tags = data.get('tags', [])
+                    category = data.get('category', '')
+                    content = data.get('content', '')
+                    return {
+                        'title': title,
+                        'summary': summary,
+                        'tags': tags,
+                        'category': category,
+                        'content': content
+                    }
+                except Exception as e:
+                    print(f"LLM JSON 파싱 오류: {e}")
+                    # fallback: 전체 응답을 content로 저장
+                    return {
+                        'title': topic,
+                        'summary': '',
+                        'tags': [],
+                        'category': '',
+                        'content': raw
+                    }
             else:
-                print(f" LLM API 오류: {response.status_code}")
-                return self._generate_dummy_blog_post(news_data, topic)
-                
+                return {
+                    'title': topic,
+                    'summary': '',
+                    'tags': [],
+                    'category': '',
+                    'content': self._generate_dummy_blog_post(news_data, topic)
+                }
         except Exception as e:
-            print(f" LLM 연결 실패: {e}")
-            return self._generate_dummy_blog_post(news_data, topic)
+            print(f"블로그 글 생성 중 오류: {e}")
+            return {
+                'title': topic,
+                'summary': '',
+                'tags': [],
+                'category': '',
+                'content': self._generate_dummy_blog_post(news_data, topic)
+            }
     
     def _generate_dummy_blog_post(self, news_data, topic):
         """테스트용 더미 블로그 포스트"""
-        blog_content = f"""# {topic} - BBC 뉴스 분석
+        blog_content = f"""# {topic} - 한국 뉴스 분석
 
 ## 들어가며
 
-최근 BBC에서 보도한 주요 뉴스들을 바탕으로 {topic}에 대한 심층 분석을 제공합니다.
+최근 한국 주요 언론사에서 보도한 주요 뉴스들을 바탕으로 {topic}에 대한 심층 분석을 제공합니다.
 
 ## 주요 뉴스 요약
 
@@ -221,8 +277,9 @@ class BBCNewsProcessor:
 ### {news['title']}
 
 **카테고리**: {news['category']}  
+**출처**: {news['source']}  
 **발행일**: {news['published']}  
-**출처**: [BBC 뉴스]({news['link']})
+**원문**: [링크]({news['link']})
 
 {news['summary']}
 
@@ -235,13 +292,13 @@ class BBCNewsProcessor:
 위의 뉴스들을 종합적으로 분석한 결과, 다음과 같은 시사점을 도출할 수 있습니다:
 
 ### 1. 현재 동향
-- 주요 이슈들이 급속도로 발전하고 있습니다
-- 글로벌 영향력이 확대되고 있습니다
+- 한국 시장에서 주요 이슈들이 급속도로 발전하고 있습니다
+- 국내외 영향력이 확대되고 있습니다
 
 ### 2. 핵심 포인트
-- **기술 발전**: 최신 기술이 빠르게 도입되고 있습니다
+- **기술 발전**: 한국의 최신 기술이 빠르게 도입되고 있습니다
 - **시장 변화**: 새로운 패러다임이 등장하고 있습니다
-- **글로벌 협력**: 국제적 협력이 강화되고 있습니다
+- **정책 동향**: 정부의 정책 변화가 산업에 영향을 미치고 있습니다
 
 ### 3. 향후 전망
 {topic} 분야는 지속적인 성장세를 보일 것으로 예상되며, 특히 한국 시장에서도 활발한 활동이 예상됩니다.
@@ -252,60 +309,29 @@ class BBCNewsProcessor:
 
 ---
 
-*이 글은 BBC 뉴스를 참고하여 작성되었습니다.*
+*이 글은 한국 주요 언론사의 뉴스를 참고하여 작성되었습니다.*
 """
         
         return blog_content
     
-    async def save_blog_post(self, content, topic):
-        """블로그 글을 마크다운 파일로 저장 (파일명 안전하게)"""
+    async def save_blog_post(self, content, topic=None):
+        """블로그 글을 마크다운 파일로 저장 (마크다운 텍스트)"""
         today_str = datetime.now().strftime('%Y-%m-%d')
-        data_dir = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), 'data', 'blog_posts')
+        data_dir = os.path.join(os.path.dirname(os.path.dirname(__file__)), 'data', 'blog_posts')
         os.makedirs(data_dir, exist_ok=True)
-        # 파일명에 쓸 수 있도록 30자 이내, 영문/한글/숫자/공백/밑줄만 허용
-        safe_topic = re.sub(r'[^\w\d가-힣_ ]', '', topic)[:30].strip().replace(' ', '_')
+        # 파일명에 쓸 수 있도록 30자 이내, 영문/한글/숫자/공백/밑줄만 허용, 윈도우 금지 특수문자 완전 제거
+        import re
+        safe_topic = re.sub(r'[\\/:*?"<>|\s]', '_', topic or 'korean_blog_post')
+        safe_topic = re.sub(r'[^\w\d가-힣_]', '', safe_topic)[:30]
         if not safe_topic:
-            safe_topic = 'blog_post'
-        filename = os.path.join(data_dir, f"blog_{safe_topic}_{today_str}.md")
+            safe_topic = 'korean_blog_post'
+        filename = os.path.join(data_dir, f"blog_KoreanNews_{safe_topic}_{today_str}.md")
         with open(filename, 'w', encoding='utf-8') as f:
             f.write(content)
         print(f"[SAVE] 블로그 글 저장 완료: {filename}")
-        
         # recentBlog.md 업데이트
-        self.update_recent_blog_md(filename, topic, "BBC뉴스")
-        
-        return filename
-    
-    def update_recent_blog_md(self, file_path, topic, source_type):
-        """recentBlog.md 파일을 업데이트하여 최신 블로그 글 정보 저장"""
-        try:
-            # 현재 시간
-            current_time = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
-            
-            # recentBlog.md 내용 생성
-            content = f"""# 최신 블로그 글 정보
-
-## 📝 최근 생성된 블로그 글
-
-### **제목**: {topic}
-- **파일경로**: {file_path}
-- **소스**: {source_type}
-- **생성일시**: {current_time}
-- **상태**: 생성 완료 (업로드 대기)
-
----
-
-*이 파일은 자동으로 생성되었습니다. 최신 블로그 글 정보를 관리합니다.*
-"""
-            
-            # recentBlog.md 파일 저장
-            with open('recentBlog.md', 'w', encoding='utf-8') as f:
-                f.write(content)
-            
-            print(f"✅ recentBlog.md 업데이트 완료: {topic}")
-            
-        except Exception as e:
-            print(f"⚠️ recentBlog.md 업데이트 실패: {e}")
+        self.update_recent_blog_md(filename, {"title": topic or 'korean_blog_post'})
+        return filename, {"title": topic or 'korean_blog_post'}
     
     async def post_to_tistory(self, blog_file, category_id=None, tags=None):
         """티스토리에 자동 포스팅 (API 방식은 사용하지 않음)"""
@@ -319,16 +345,16 @@ async def main():
     COOKIE = config.TISTORY_COOKIE
     CATEGORY_ID = config.TISTORY_CATEGORY_ID
     TAGS = getattr(config, 'TISTORY_TAGS', None)  # 태그가 없으면 None 사용
-    BBC_CATEGORY = config.BBC_CATEGORY
-    BBC_LIMIT = config.BBC_LIMIT_PER_CATEGORY
+    KOREAN_CATEGORY = getattr(config, 'KOREAN_CATEGORY', 'all')  # 한국 뉴스 카테고리
+    KOREAN_LIMIT = getattr(config, 'KOREAN_LIMIT_PER_CATEGORY', 3)  # 카테고리당 뉴스 수
     USE_AUTO_TOPIC = getattr(config, 'USE_AUTO_TOPIC', True)  # 자동 주제 생성 사용 여부
-    DEFAULT_TOPIC = getattr(config, 'BLOG_TOPIC', "글로벌 기술 트렌드와 시장 동향")
+    DEFAULT_TOPIC = getattr(config, 'KOREAN_BLOG_TOPIC', "Korean_News_")
     
-    # BBC 뉴스 프로세서 초기화
-    processor = BBCNewsProcessor(BLOG_NAME, COOKIE)
+    # 한국 뉴스 프로세서 초기화
+    processor = KoreanNewsProcessor(BLOG_NAME, COOKIE)
     
-    # 1. BBC 뉴스 수집 및 JSON 저장
-    news_data = await processor.collect_and_save_json(BBC_CATEGORY, BBC_LIMIT)
+    # 1. 한국 뉴스 수집 및 JSON 저장
+    news_data = await processor.collect_and_save_json(KOREAN_CATEGORY, KOREAN_LIMIT)
     
     # 2. 블로그 글 주제 생성 (자동 또는 수동)
     if USE_AUTO_TOPIC:
@@ -340,10 +366,10 @@ async def main():
         print(f" 설정된 주제 사용: {topic}")
     
     # 3. 블로그 글 생성
-    blog_content = await processor.generate_blog_post(news_data, topic)
+    blog_data = await processor.generate_blog_post(news_data, topic)
     
     # 4. 블로그 글 저장
-    filename = await processor.save_blog_post(blog_content, topic)
+    filename, blog_data = await processor.save_blog_post(blog_data.get('content', ''), topic)
     
     # 5. 티스토리 자동 포스팅 (선택사항)
     if processor.tistory_poster:
